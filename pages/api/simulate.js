@@ -2,11 +2,26 @@ const nba = require('nba');
 
 export default async function handler(req, res) {
   try {
-    const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    const games = await nba.stats.scoreboard({ gameDate: today });
+    // Get date from query parameter, default to today if not provided
+    const { date } = req.query;
+    let gameDate;
+
+    if (date) {
+      // Validate and use the provided date (format: MM/DD/YYYY)
+      const [month, day, year] = date.split('/').map(Number);
+      if (isNaN(month) || isNaN(day) || isNaN(year) || month < 1 || month > 12 || day < 1 || day > 31) {
+        return res.status(400).json({ error: 'Invalid date format. Use MM/DD/YYYY' });
+      }
+      gameDate = `${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')}/${year}`;
+    } else {
+      // Default to today if no date is provided
+      gameDate = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    }
+
+    const games = await nba.stats.scoreboard({ gameDate });
 
     if (!games.numGames || games.numGames === 0) {
-      return res.status(404).json({ error: 'No games scheduled today' });
+      return res.status(404).json({ error: `No games scheduled on ${gameDate}` });
     }
 
     const teamIdToName = {};
@@ -44,7 +59,7 @@ export default async function handler(req, res) {
       };
     });
 
-    res.status(200).json({ games: results });
+    res.status(200).json({ games: results, date: gameDate });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
