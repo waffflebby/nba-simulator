@@ -18,28 +18,38 @@ export default async function handler(req, res) {
       gameDate = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     }
 
+    // Fetch only the scoreboard to check for games quickly
     const games = await nba.stats.scoreboard({ gameDate });
 
     if (!games.numGames || games.numGames === 0) {
       return res.status(404).json({ error: `No games scheduled on ${gameDate}` });
     }
 
+    // Fetch team info in parallel for better performance
+    const teamPromises = games.games.map(game => 
+      Promise.all([
+        nba.stats.teamInfoCommon({ TeamID: game.homeTeamId }),
+        nba.stats.teamInfoCommon({ TeamID: game.visitorTeamId })
+      ])
+    );
+    const teamResults = await Promise.all(teamPromises);
+
     const teamIdToName = {};
-    const teams = await nba.stats.teamInfoCommon();
-    teams.teamInfo.forEach(team => {
-      teamIdToName[team.teamId] = team.teamName;
+    teamResults.forEach(([homeTeam, visitorTeam]) => {
+      teamIdToName[homeTeam.teamInfo[0].teamId] = homeTeam.teamInfo[0].teamName;
+      teamIdToName[visitorTeam.teamInfo[0].teamId] = visitorTeam.teamInfo[0].teamName;
     });
 
-    const results = games.games.map(game => {
+    const results = games.games.map((game, index) => {
       const homeTeamId = game.homeTeamId;
       const visitorTeamId = game.visitorTeamId;
       const homeTeamName = teamIdToName[homeTeamId];
       const visitorTeamName = teamIdToName[visitorTeamId];
 
-      // Simplified stats (you can expand this with more detailed data from nba.stats)
+      // Use simplified, hardcoded stats to reduce processing time
       const homeStats = getTeamStats(homeTeamId);
       const visitorStats = getTeamStats(visitorTeamId);
-      const { homeWinProb, avgHomeScore, avgVisitorScore } = simulateGame(homeStats, visitorStats);
+      const { homeWinProb, avgHomeScore, avgVisitorScore } = simulateGame(homeStats, visitorStats, 100); // Reduce simulations
 
       const homeML = winProbToMoneyline(homeWinProb);
       const visitorML = winProbToMoneyline(1 - homeWinProb);
@@ -61,44 +71,25 @@ export default async function handler(req, res) {
 
     res.status(200).json({ games: results, date: gameDate });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
 
 function getTeamStats(teamId) {
-  // Placeholder for team stats (ORTG, DRTG, Pace). You’d need to fetch or hardcode these from nba.stats or another source.
-  // For now, use approximate values or expand with real data from nba.stats.teamStats or similar endpoints.
-  return {
-    ortg: 110, // Offensive Rating (placeholder)
-    drtg: 108, // Defensive Rating (placeholder)
-    pace: 100, // Pace (placeholder)
+  // Use hardcoded or cached stats to avoid additional API calls
+  const teamStats = {
+    1610612737: { ortg: 112, drtg: 108, pace: 98 }, // Boston Celtics (example)
+    1610612738: { ortg: 110, drtg: 107, pace: 100 }, // Houston Rockets (example)
+    // Add more teams as needed or fetch once and cache
   };
+  return teamStats[teamId] || { ortg: 110, drtg: 108, pace: 100 }; // Default stats
 }
 
-function simulateGame(homeTeam, visitorTeam, numSimulations = 1000) {
+function simulateGame(homeTeam, visitorTeam, numSimulations = 100) {
   let homeWins = 0;
   const homeScores = [];
   const visitorScores = [];
 
   for (let i = 0; i < numSimulations; i++) {
     const possessions = (homeTeam.pace + visitorTeam.pace) / 2;
-    const homeAdjustedOrtg = homeTeam.ortg - (visitorTeam.drtg - 112); // Using league average DRTG of 112 as a placeholder
-    const visitorAdjustedOrtg = visitorTeam.ortg - (homeTeam.drtg - 112);
-    const homePoints = Math.random() * ((homeAdjustedOrtg / 100) * possessions * 1.1); // Simplified random simulation
-    const visitorPoints = Math.random() * ((visitorAdjustedOrtg / 100) * possessions * 1.1);
-    homeScores.push(homePoints);
-    visitorScores.push(visitorPoints);
-    if (homePoints > visitorPoints) homeWins++;
-  }
-
-  return {
-    homeWinProb: homeWins / numSimulations,
-    avgHomeScore: homeScores.reduce((a, b) => a + b, 0) / numSimulations,
-    avgVisitorScore: visitorScores.reduce((a, b) => a + b, 0) / numSimulations,
-  };
-}
-
-function winProbToMoneyline(prob) {
-  if (prob > 0.5) return -Math.round((prob / (1 - prob)) * 100);
-  return Math.round(((1 - prob) / prob) * 100);
-}
+    const homeAdjustedOrtg = homeTeam
