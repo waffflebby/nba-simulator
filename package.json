@@ -1,0 +1,17 @@
+{
+  "name": "nba-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "nba_api": "^1.0.0",
+    "next": "latest",
+    "numpy": "^1.0.0",
+    "react": "latest",
+    "react-dom": "latest"
+  }
+}
