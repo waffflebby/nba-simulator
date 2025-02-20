@@ -5,6 +5,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedDate, setSelectedDate] = useState('today');
+  const [customDate, setCustomDate] = useState('');
 
   const getDateForSimulation = () => {
     const today = new Date();
@@ -20,14 +21,15 @@ export default function Home() {
     return today.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   };
 
-  const [customDate, setCustomDate] = useState('');
-
   const runSimulation = async () => {
     setLoading(true);
     setError(null);
     try {
       const date = getDateForSimulation();
       const res = await fetch(`/api/simulate?date=${date}`);
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setGames(data.games);
@@ -71,4 +73,22 @@ export default function Home() {
       {error && <p className="text-red-500 text-center mt-4">{error}</p>}
       <div className="mt-6 space-y-4">
         {games.map((game, index) => (
-          <div key={index} className="
+          <div key={index} className="bg-gray-800 p-4 rounded shadow">
+            <h2 className="text-xl font-semibold">{game.visitor_team} @ {game.home_team}</h2>
+            <h3 className="text-lg mt-2">Team Stats</h3>
+            <p>
+              {game.home_team}: ORTG {game.home_stats.ortg.toFixed(1)}, DRTG {game.home_stats.drtg.toFixed(1)}, Pace {game.home_stats.pace.toFixed(1)}
+            </p>
+            <p>
+              {game.visitor_team}: ORTG {game.visitor_stats.ortg.toFixed(1)}, DRTG {game.visitor_stats.drtg.toFixed(1)}, Pace {game.visitor_stats.pace.toFixed(1)}
+            </p>
+            <h3 className="text-lg mt-2">Predictions</h3>
+            <p>Moneyline: {game.home_team} {game.predictions.moneyline.home}, {game.visitor_team} {game.predictions.moneyline.visitor}</p>
+            <p>Spread: {game.home_team} {game.predictions.spread.home.toFixed(1)}, {game.visitor_team} {game.predictions.spread.visitor.toFixed(1)}</p>
+            <p>Over/Under: {game.predictions.over_under.toFixed(1)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
