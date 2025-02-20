@@ -1,43 +1,48 @@
-const { ScoreboardV2, TeamYearByYearStats } = require('nba_api/stats/endpoints');
-const { teams } = require('nba_api/stats/static');
-const numpy = require('numpy');
+const nba = require('nba');
 
 export default async function handler(req, res) {
   try {
     const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    const scoreboard = await new ScoreboardV2({ game_date: today }).get_data_frames()[0];
-    const games = scoreboard[['GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID']];
+    const games = await nba.stats.scoreboard({ gameDate: today });
 
-    if (games.length === 0) {
+    if (!games.numGames || games.numGames === 0) {
       return res.status(404).json({ error: 'No games scheduled today' });
     }
 
-    const teamIdToName = teams.get_teams().reduce((acc, team) => ({ ...acc, [team.id]: team.full_name }), {});
+    const teamIdToName = {};
+    const teams = await nba.stats.teamInfoCommon();
+    teams.teamInfo.forEach(team => {
+      teamIdToName[team.teamId] = team.teamName;
+    });
 
-    const results = await Promise.all(
-      games.map(async (game) => {
-        const homeTeam = await getTeamStats(game.HOME_TEAM_ID, teamIdToName);
-        const visitorTeam = await getTeamStats(game.VISITOR_TEAM_ID, teamIdToName);
-        const { homeWinProb, avgHomeScore, avgVisitorScore } = simulateGame(homeTeam, visitorTeam);
+    const results = games.games.map(game => {
+      const homeTeamId = game.homeTeamId;
+      const visitorTeamId = game.visitorTeamId;
+      const homeTeamName = teamIdToName[homeTeamId];
+      const visitorTeamName = teamIdToName[visitorTeamId];
 
-        const homeML = winProbToMoneyline(homeWinProb);
-        const visitorML = winProbToMoneyline(1 - homeWinProb);
-        const spread = avgHomeScore - avgVisitorScore;
-        const total = avgHomeScore + avgVisitorScore;
+      // Simplified stats (you can expand this with more detailed data from nba.stats)
+      const homeStats = getTeamStats(homeTeamId);
+      const visitorStats = getTeamStats(visitorTeamId);
+      const { homeWinProb, avgHomeScore, avgVisitorScore } = simulateGame(homeStats, visitorStats);
 
-        return {
-          home_team: homeTeam.name,
-          visitor_team: visitorTeam.name,
-          home_stats: { ortg: homeTeam.ortg, drtg: homeTeam.drtg, pace: homeTeam.pace },
-          visitor_stats: { ortg: visitorTeam.ortg, drtg: visitorTeam.drtg, pace: visitorTeam.pace },
-          predictions: {
-            moneyline: { home: homeML, visitor: visitorML },
-            spread: { home: spread > 0 ? -spread : Math.abs(spread), visitor: spread > 0 ? spread : -spread },
-            over_under: total,
-          },
-        };
-      })
-    );
+      const homeML = winProbToMoneyline(homeWinProb);
+      const visitorML = winProbToMoneyline(1 - homeWinProb);
+      const spread = avgHomeScore - avgVisitorScore;
+      const total = avgHomeScore + avgVisitorScore;
+
+      return {
+        home_team: homeTeamName,
+        visitor_team: visitorTeamName,
+        home_stats: { ortg: homeStats.ortg, drtg: homeStats.drtg, pace: homeStats.pace },
+        visitor_stats: { ortg: visitorStats.ortg, drtg: visitorStats.drtg, pace: visitorStats.pace },
+        predictions: {
+          moneyline: { home: homeML, visitor: visitorML },
+          spread: { home: spread > 0 ? -spread : Math.abs(spread), visitor: spread > 0 ? spread : -spread },
+          over_under: total,
+        },
+      };
+    });
 
     res.status(200).json({ games: results });
   } catch (error) {
@@ -45,14 +50,13 @@ export default async function handler(req, res) {
   }
 }
 
-async function getTeamStats(teamId, teamIdToName) {
-  const stats = await new TeamYearByYearStats({ team_id: teamId }).get_data_frames()[0];
-  const latestStats = stats.find(row => row.YEAR === '2024-25');
+function getTeamStats(teamId) {
+  // Placeholder for team stats (ORTG, DRTG, Pace). You’d need to fetch or hardcode these from nba.stats or another source.
+  // For now, use approximate values or expand with real data from nba.stats.teamStats or similar endpoints.
   return {
-    name: teamIdToName[teamId],
-    ortg: latestStats.OFF_RATING,
-    drtg: latestStats.DEF_RATING,
-    pace: latestStats.PACE,
+    ortg: 110, // Offensive Rating (placeholder)
+    drtg: 108, // Defensive Rating (placeholder)
+    pace: 100, // Pace (placeholder)
   };
 }
 
@@ -60,14 +64,13 @@ function simulateGame(homeTeam, visitorTeam, numSimulations = 1000) {
   let homeWins = 0;
   const homeScores = [];
   const visitorScores = [];
-  const leagueAvgDrtg = 112;
 
   for (let i = 0; i < numSimulations; i++) {
     const possessions = (homeTeam.pace + visitorTeam.pace) / 2;
-    const homeAdjustedOrtg = homeTeam.ortg - (visitorTeam.drtg - leagueAvgDrtg);
-    const visitorAdjustedOrtg = visitorTeam.ortg - (homeTeam.drtg - leagueAvgDrtg);
-    const homePoints = numpy.random.normal((homeAdjustedOrtg / 100) * possessions, 10);
-    const visitorPoints = numpy.random.normal((visitorAdjustedOrtg / 100) * possessions, 10);
+    const homeAdjustedOrtg = homeTeam.ortg - (visitorTeam.drtg - 112); // Using league average DRTG of 112 as a placeholder
+    const visitorAdjustedOrtg = visitorTeam.ortg - (homeTeam.drtg - 112);
+    const homePoints = Math.random() * ((homeAdjustedOrtg / 100) * possessions * 1.1); // Simplified random simulation
+    const visitorPoints = Math.random() * ((visitorAdjustedOrtg / 100) * possessions * 1.1);
     homeScores.push(homePoints);
     visitorScores.push(visitorPoints);
     if (homePoints > visitorPoints) homeWins++;
@@ -75,8 +78,8 @@ function simulateGame(homeTeam, visitorTeam, numSimulations = 1000) {
 
   return {
     homeWinProb: homeWins / numSimulations,
-    avgHomeScore: numpy.mean(homeScores),
-    avgVisitorScore: numpy.mean(visitorScores),
+    avgHomeScore: homeScores.reduce((a, b) => a + b, 0) / numSimulations,
+    avgVisitorScore: visitorScores.reduce((a, b) => a + b, 0) / numSimulations,
   };
 }
 
