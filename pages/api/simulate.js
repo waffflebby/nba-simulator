@@ -92,4 +92,23 @@ function simulateGame(homeTeam, visitorTeam, numSimulations = 100) {
 
   for (let i = 0; i < numSimulations; i++) {
     const possessions = (homeTeam.pace + visitorTeam.pace) / 2;
-    const homeAdjustedOrtg = homeTeam
+    const homeAdjustedOrtg = homeTeam.ortg - (visitorTeam.drtg - 112);
+    const visitorAdjustedOrtg = visitorTeam.ortg - (homeTeam.drtg - 112);
+    const homePoints = Math.random() * ((homeAdjustedOrtg / 100) * possessions * 1.1);
+    const visitorPoints = Math.random() * ((visitorAdjustedOrtg / 100) * possessions * 1.1);
+    homeScores.push(homePoints);
+    visitorScores.push(visitorPoints);
+    if (homePoints > visitorPoints) homeWins++;
+  }
+
+  return {
+    homeWinProb: homeWins / numSimulations,
+    avgHomeScore: homeScores.reduce((a, b) => a + b, 0) / numSimulations,
+    avgVisitorScore: visitorScores.reduce((a, b) => a + b, 0) / numSimulations,
+  };
+}
+
+function winProbToMoneyline(prob) {
+  if (prob > 0.5) return -Math.round((prob / (1 - prob)) * 100);
+  return Math.round(((1 - prob) / prob) * 100);
+}
